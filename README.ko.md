@@ -110,7 +110,7 @@ npm test
 이 저장소의 모든 스킬을 처음부터 독자적으로 만들었다고 주장하지 않는다.
 
 - **Paperthin:** `re0`, `hate`, `feynman`, `mandela` 등을 포함한 가져온 스킬은 [LilMGenius/paperthin](https://github.com/LilMGenius/paperthin)에서 유래한다. 위 추천 목록에는 넣지 않았다. 원저자의 기여를 이 프로젝트의 독자 창작으로 소개하지 않는다.
-- **책 기반 워크플로:** `clean-code` 계열, `dont-make-me-think`, `testing` 계열은 각 스킬에 명시된 책·원칙을 바탕으로 한다. 원저자의 공식 제품이나 보증을 뜻하지 않는다.
+- **책 기반 워크플로:** `clean-code` 계열과 `dont-make-me-think`는 각 스킬에 명시된 책·원칙을 바탕으로 한다. 원저자의 공식 제품이나 보증을 뜻하지 않는다.
 - **가져오기 기록:** [migration/import.json](migration/import.json)은 원본 리소스 URI를, [aliases.json](aliases.json)은 채택된 URI 매핑을 기록한다. URI 기록만으로 저작권·라이선스가 확정되지는 않는다.
 
 개별 콘텐츠의 출처와 적용 조건을 확인한 뒤 재사용한다. 스킬 내용을 가져오는 것과 운영 서버에 발행하는 것은 별개의 작업이다.

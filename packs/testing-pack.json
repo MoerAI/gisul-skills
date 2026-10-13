@@ -3,7 +3,7 @@
   "kind": "skill-pack",
   "name": "testing-pack",
   "display_name": "테스팅 팩",
-  "description": "Unit Testing Principles, Practices, and Patterns 기반으로 테스트 가치, 단위 테스트 구조, mock, testability, integration, database와 anti-pattern 절차를 조합한다.",
+  "description": "테스트 가치, 단위 테스트 구조, mock, testability, integration, database와 anti-pattern 절차를 조합한다.",
   "scope": "요청한 기능·변경 범위의 관찰 가능한 계약과 회귀 위험에 맞춰 테스트를 설계·리뷰·개선한다. coverage나 테스트 수를 품질 대리값으로 쓰지 않으며, 팩을 읽는 것은 코드 변경·실행·commit·push·배포 권한을 부여하지 않는다.",
   "members": [
     {

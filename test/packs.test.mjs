@@ -27,8 +27,8 @@ test('published packs retain roles, required members and reference closure',asyn
  assert.ok(testing.members.some(m=>m.uri.endsWith('/testing/SKILL.md')&&m.phase==='investigate'&&m.selection==='required'));
  const testingEntry=catalog.valid.find(s=>s.name==='testing');
  assert.deepEqual(testingEntry.resources.map(r=>r.uri).filter(uri=>uri.includes('/references/')).sort(),[
-  'skill://gisul/gisul/testing/references/chapter-guide.md',
-  'skill://gisul/gisul/testing/references/sources-and-guardrails.md'
+  'skill://gisul/gisul/testing/references/core-principles.md',
+  'skill://gisul/gisul/testing/references/operating-guardrails.md'
  ]);
  const testingSpecialists=catalog.valid.filter(s=>/^testing-/.test(s.name)).map(s=>s.uri).sort();
  assert.deepEqual(testing.members.filter(m=>m.selection==='when_applicable').map(m=>m.uri).sort(),testingSpecialists);

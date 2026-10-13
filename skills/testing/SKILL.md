@@ -1,13 +1,13 @@
 ---
 name: "testing"
-description: "테스트 전략을 설계·리뷰하고 unit test, integration test, mock, database test, testability와 anti-pattern 전문 절차를 선택한다. Unit Testing Principles, Practices, and Patterns 기반으로 coverage보다 회귀 방지, refactoring 내성, 빠른 피드백과 유지비를 함께 판단할 때 사용한다."
+description: "테스트 전략을 설계·리뷰하고 unit test, integration test, mock, database test, testability와 anti-pattern 전문 절차를 선택한다. coverage보다 회귀 방지, refactoring 내성, 빠른 피드백과 유지비를 함께 판단할 때 사용한다."
 ---
 
 # Testing
 
 테스트 수나 coverage를 목표로 삼지 말고, 중요한 동작을 낮은 유지비로 오래 보호하는 테스트 포트폴리오를 만든다. 이 스킬은 진입점이다. 세부 작업에는 필요한 `testing-*` 전문 스킬만 읽는다.
 
-책의 장별 근거와 적용 범위는 [chapter guide](references/chapter-guide.md), 출처·가드레일은 [sources and guardrails](references/sources-and-guardrails.md)를 확인한다.
+세부 판단 기준은 [핵심 테스트 원칙](references/core-principles.md), 실행과 보고 제한은 [운영 가드레일](references/operating-guardrails.md)을 확인한다.
 
 ## 1. 계약과 위험을 고정한다
 
