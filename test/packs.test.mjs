@@ -13,8 +13,8 @@ const member=(n,phase)=>({uri:`skill://gisul/gisul/${n}/SKILL.md`,phase,selectio
 const def={schema_version:1,kind:'skill-pack',name:'example-pack',display_name:'Example',description:'Example review',scope:'fixture',members:[member('scope','scope'),member('backend','investigate'),member('verify','verify')]};
 test('published packs retain roles, required members and reference closure',async()=>{
  const catalog=await validate();const packs=await readPacks(new URL('..',import.meta.url).pathname,catalog.valid);
- assert.deepEqual(packs.map(p=>p.definition.name),['architecture-pack','backend-pack','clean-code-pack','frontend-pack']);
- assert.deepEqual(packs.map(p=>p.definition.members.length),[14,13,12,13]);
+ assert.deepEqual(packs.map(p=>p.definition.name),['architecture-pack','backend-pack','clean-code-pack','frontend-pack','testing-pack']);
+ assert.deepEqual(packs.map(p=>p.definition.members.length),[14,13,12,13,9]);
  assert.ok(packs.every(p=>p.definition.members.some(m=>m.uri.endsWith('/review-verifier/SKILL.md')&&m.selection==='required')));
  const combined=packs.filter(p=>['backend-pack','frontend-pack'].includes(p.definition.name)).flatMap(p=>p.definition.members);
  assert.equal(combined.length,26);assert.equal(new Set(combined.map(m=>m.uri)).size,17);
@@ -23,6 +23,15 @@ test('published packs retain roles, required members and reference closure',asyn
  assert.ok(clean.members.some(m=>m.uri.endsWith('/clean-code/SKILL.md')&&m.phase==='investigate'&&m.selection==='required'));
  const specialists=catalog.valid.filter(s=>/^clean-code-/.test(s.name)).map(s=>s.uri).sort();
  assert.deepEqual(clean.members.filter(m=>m.selection==='when_applicable').map(m=>m.uri).sort(),specialists);
+ const testing=packs.find(p=>p.definition.name==='testing-pack').definition;
+ assert.ok(testing.members.some(m=>m.uri.endsWith('/testing/SKILL.md')&&m.phase==='investigate'&&m.selection==='required'));
+ const testingEntry=catalog.valid.find(s=>s.name==='testing');
+ assert.deepEqual(testingEntry.resources.map(r=>r.uri).filter(uri=>uri.includes('/references/')).sort(),[
+  'skill://gisul/gisul/testing/references/chapter-guide.md',
+  'skill://gisul/gisul/testing/references/sources-and-guardrails.md'
+ ]);
+ const testingSpecialists=catalog.valid.filter(s=>/^testing-/.test(s.name)).map(s=>s.uri).sort();
+ assert.deepEqual(testing.members.filter(m=>m.selection==='when_applicable').map(m=>m.uri).sort(),testingSpecialists);
  const roles=new Map();
  for(const {definition} of packs) for(const m of definition.members){
   if(roles.has(m.uri))assert.equal(roles.get(m.uri),m.phase,'Shared members must retain their phase across packs');

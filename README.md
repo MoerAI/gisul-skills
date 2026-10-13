@@ -48,6 +48,7 @@ This is not expertise in a bottle. It's a set of procedures an agent can try to 
 
 ### 03 / Clicking the button once isn't a test strategy.
 
+- [**testing**](skills/testing/SKILL.md) — Choose valuable unit, integration, mock, and database testing procedures by contract and risk, not coverage targets. Available as the [testing pack](packs/testing-pack.json).
 - [**test-behavior-flows**](skills/test-behavior-flows/SKILL.md) — Verify connected behavior across interactions, asynchronous work, recovery, and data consistency.
 - [**review-failure-resilience**](skills/review-failure-resilience/SKILL.md) — Review timeouts, retries, duplicate effects, partial failures, and recovery paths.
 - [**web-operations-qa**](skills/web-operations-qa/SKILL.md) — Investigate production performance, caches, API latency, and background work using actual evidence.
@@ -111,7 +112,7 @@ The validator checks discovery rules such as frontmatter, matching names and dir
 Not every skill in this repository was created here from scratch.
 
 - **Paperthin:** Imported skills including `re0`, `hate`, `feynman`, and `mandela` originate from [LilMGenius/paperthin](https://github.com/LilMGenius/paperthin). They are not included in the featured selection above. Their authors' work is not presented as this project's original invention.
-- **Book-derived workflows:** The `clean-code` family and `dont-make-me-think` draw on the books and principles identified in their skill files. They are not official products or endorsements from those authors.
+- **Book-derived workflows:** The `clean-code` family, `dont-make-me-think`, and `testing` family draw on the books and principles identified in their skill files. They are not official products or endorsements from those authors.
 - **Import records:** [migration/import.json](migration/import.json) records original resource URIs. [aliases.json](aliases.json) records adopted URI mappings. A URI record alone does not establish copyright or licensing terms.
 
 Check each item's provenance and applicable terms before reuse. Importing content and publishing it to a live server are separate operations.
