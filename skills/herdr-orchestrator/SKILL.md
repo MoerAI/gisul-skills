@@ -178,7 +178,8 @@ At the end of orchestration, after accounting for the assignments and recording 
 if [ -n "$FLOW_ID" ]; then
   curl -fsS --connect-timeout 2 --max-time 5 \
     -X POST "$GISOOL_URL/api/flows/$FLOW_ID/end" \
-    -H "Authorization: Bearer $(cat ~/.gisool/token)" || true
+    -H "Authorization: Bearer $(cat ~/.gisool/token)" \
+    -H 'Content-Type: application/json' --data '{}' || true
 fi
 ```
 
