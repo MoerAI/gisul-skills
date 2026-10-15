@@ -113,6 +113,75 @@ Inspect the actual changes, integrate them coherently, and run checks appropriat
 
 Finish when the user's acceptance criteria are met and all required assignments are accounted for. Report the outcome, verification, and remaining limitations concisely. Preserve useful artifacts and leave unrelated agents and user-managed tabs intact.
 
+## gisool tracing
+
+Register this task's intended workflow with gisool before opening panes, then attach each pane to its step. Tracing is best-effort observation: if gisool is unavailable, continue orchestration and note the tracing gap. Intended skills are guidance for the agents, not restrictions; differences between the plan and actual skill use are feedback data.
+
+Use the workspace and tab IDs verified during discovery as `HERDR_WORKSPACE_ID` and `HERDR_TAB_ID`. Read the local port from `~/.gisool/config.json` (`port`, default `8799`) and authenticate with `~/.gisool/token`. Keep the flow ID in the task ledger for recovery.
+
+Before opening panes, adapt this example's spec name, step IDs, and intended skills to the task. Spec and step IDs are slugs of at most 64 characters; a spec has 1-50 unique steps, each with up to 10 intended skills. `together: true` means all listed skills are expected in that step; `false` means any one satisfies the intention. `expectTools` and `doneWhen` describe expected activity and completion without enforcing either.
+
+```sh
+GISOOL_PORT=$(jq -r '.port // 8799' ~/.gisool/config.json 2>/dev/null) || true
+GISOOL_URL="http://127.0.0.1:${GISOOL_PORT:-8799}"
+SPEC_NAME="task-workflow"
+WORKFLOW_SPEC=$(jq -n --arg name "$SPEC_NAME" '{
+  name: $name,
+  steps: [
+    {id: "implement", skills: ["programming"], together: false,
+     expectTools: [], doneWhen: "Implementation is ready for review"},
+    {id: "verify", skills: ["review-work"], together: false,
+     expectTools: [], doneWhen: "Acceptance criteria are verified"}
+  ]
+}') || true
+
+curl -fsS --connect-timeout 2 --max-time 5 -X POST "$GISOOL_URL/api/workflows" \
+  -H "Authorization: Bearer $(cat ~/.gisool/token)" \
+  -H 'Content-Type: application/json' \
+  --data "$WORKFLOW_SPEC" || true
+
+# Do not use curl -f here: HTTP 409 carries the existing flowId to reuse.
+FLOW_RESPONSE=$(curl -sS --connect-timeout 2 --max-time 5 \
+  -X POST "$GISOOL_URL/api/flows" \
+  -H "Authorization: Bearer $(cat ~/.gisool/token)" \
+  -H 'Content-Type: application/json' \
+  --data "$(jq -n --arg workspaceId "$HERDR_WORKSPACE_ID" \
+    --arg tabId "$HERDR_TAB_ID" --arg name "$SPEC_NAME" \
+    '{workspaceId: $workspaceId, tabId: $tabId, spec: {name: $name}}')") || true
+FLOW_ID=$(printf '%s' "$FLOW_RESPONSE" | jq -er '
+  if .error == "flow_already_open" then .flowId
+  elif .error == null then .id
+  else empty end | select(type == "string" and length > 0)
+') || true
+```
+
+A successful flow creation returns `id`; HTTP 409 returns `error: "flow_already_open"` and `flowId`. Reuse that `flowId` rather than opening another flow for the same workspace and tab. On recovery, reconcile the existing flow with the task ledger before mapping more panes. Other errors leave tracing unavailable; do not treat an error response as a flow ID.
+
+Immediately after each `herdr pane split`, take the new pane ID from Herdr's response and set `PANE_ID` to that exact ID and `STEP_ID` to its declared step ID. Register the mapping before dispatching the step's assignment. Also map a reused pane when assigning it a step.
+
+```sh
+if [ -n "$FLOW_ID" ]; then
+  curl -fsS --connect-timeout 2 --max-time 5 \
+    -X POST "$GISOOL_URL/api/flows/$FLOW_ID/steps" \
+    -H "Authorization: Bearer $(cat ~/.gisool/token)" \
+    -H 'Content-Type: application/json' \
+    --data "$(jq -n --arg paneId "$PANE_ID" --arg stepId "$STEP_ID" \
+      '{paneId: $paneId, stepId: $stepId}')" || true
+fi
+```
+
+Tell each pane's agent its step ID and intended skill names as part of the bounded assignment. For example: "Step implement intends programming as guidance; choose additional or different skills when they fit the task, and report what you used." For multi-skill steps, explain whether the listed skills are intended together or as alternatives. Keep the agent's judgment intact.
+
+At the end of orchestration, after accounting for the assignments and recording the outcome, close the registered flow. Use the same cleanup when deliberately ending an interrupted task; leave unrelated flows alone.
+
+```sh
+if [ -n "$FLOW_ID" ]; then
+  curl -fsS --connect-timeout 2 --max-time 5 \
+    -X POST "$GISOOL_URL/api/flows/$FLOW_ID/end" \
+    -H "Authorization: Bearer $(cat ~/.gisool/token)" || true
+fi
+```
+
 ## References
 
 Use installed help and schema for version-specific behavior. Consult these sources when additional context is needed:
