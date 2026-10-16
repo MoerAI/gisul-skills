@@ -1,43 +1,42 @@
 ---
 name: "void-disk-cleanup"
-description: "디스크 용량 부족·빌드 캐시·node_modules·에이전트 worktree 정리 요청 시, Void(void CLI/MCP)로 읽기 전용 스캔 후 사용자가 승인한 계획만 적용한다. Disk space, build cache, dev artifact cleanup with Void."
+description: "디스크 용량 부족·빌드 캐시·node_modules·안 쓰는 git 워크트리 정리 요청이나 sweepy inbox 제안을 처리할 때, sweepy 제안을 요약해 보고하고 사용자가 승인한 제안만 적용한다. Disk space, build cache, stale git worktree cleanup with sweepy and Void."
 ---
 
-# Void로 개발 디스크 정리
+# sweepy로 개발 디스크 정리
 
-Void는 로컬에서 개발 부산물(빌드 산출물, 패키지 캐시, 에이전트 worktree·대화 기록, 로컬 AI 모델, Docker 캐시)을 찾아 위험도(safe / caution / danger)를 붙이고, 검토된 계획만 실행하는 도구다. 정리는 되돌리기 어려우므로 **스캔과 계획은 자유롭게, 적용은 사용자 승인 후에만** 한다.
+sweepy는 빌드 산출물과 git 워크트리만 다루는 정리 도구다. 무엇을 지워도 되는지는 sweepy의 정책이 정하고, 적용 직전에 다시 검증한다. 에이전트는 사람과 sweepy 사이의 전달자다: 제안을 요약해 보여주고, 승인을 받아 `sweepy apply`를 부른다. 판단을 대신하거나 제안을 고치지 않는다.
 
-## 실행 절차
+## 준비
 
-1. Void를 확인한다. MCP 도구(`disk_status`, `scan`, `explain_item`, `plan_cleanup`, `apply_plan`, `usage_by_agent`)가 보이면 그것을 쓰고, 아니면 `command -v void`로 CLI를 찾는다. 둘 다 없으면 설치하지 말고 사용자에게 알린 뒤 멈춘다. 설치 안내: https://github.com/eladbash/void
+1. `sweepy` 명령(또는 sweepy 체크아웃의 `bin/sweepy`)을 찾는다. `sweepy status`가 JSON을 돌려주면 준비된 것이다. 없으면 설치하지 말고 사용자에게 알린 뒤 멈춘다.
+2. 대화형 세션(메신저 연결 등)이라면 `~/.local/state/sweepy/inbox/`에 새 `.json` 파일이 생기는 것을 감시한다. 파일 하나가 승인 대기 중인 제안 하나다. 폴링하지 말고 파일 생성 이벤트를 구독한다.
 
-2. 현황을 본다. `disk_status` 또는 `void --json guard check`로 여유 공간을 확인하고, `scan` 또는 `void --json scan`으로 회수 후보를 얻는다. 스캔은 아무것도 바꾸지 않는다. 생태계별·위험도별 합계와 큰 항목 상위 10개(경로, 크기, 경과 일수, 위험도)를 요약하면 완료한다.
-   - CLI 스캔·계획에는 시간 제한을 건다. macOS에는 `timeout`이 없으므로 `perl -e 'alarm shift; exec @ARGV' 120 void --json scan`처럼 실행한다.
-   - 제한 시간을 넘기면 결과를 기다리지 말고, macOS 권한 대화상자가 응답을 기다리는지 확인한다: `log show --last 10m --style compact --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "AUTHREQ_PROMPTING"'`. 대화상자가 떠 있으면 서비스 이름과 요청 주체를 그대로 보고하고, 사용자가 화면에서 응답할 때까지 스캔을 다시 돌리지 않는다. 개발 캐시 정리에는 다른 앱 데이터 접근이나 전체 디스크 접근 권한이 필요 없으므로 "허용 안 함"을 권한다.
+## 제안 보고
 
-3. 후보를 걸러낸다. 아래 항목은 Void가 safe로 분류해도 계획에서 뺀다.
-   - 실행 중인 서비스나 배포 릴리스가 쓰는 경로(예: `*/releases/*/node_modules`, 현재 돌고 있는 앱의 의존성)
-   - 지금 작업 중이거나 최근 7일 안에 수정된 프로젝트의 산출물
-   - 사용자가 보존을 요청한 경로
-   - 실행 중인 프로세스가 작업 디렉터리로 쓰는 프로젝트(`lsof -d cwd`)
-   - Void 설정의 `blocked_paths` 아래 항목. Void는 이 경로를 계획에는 그대로 보여주고 적용 단계에서만 거부하므로, 보고에서 미리 빼고 "보호 경로"로 따로 적는다.
-   애매하면 `explain_item`(또는 `void scan` 결과의 `available_actions`)으로 실제 실행될 명령을 확인한다.
+새 제안 파일이 생기거나 사용자가 디스크 정리를 요청하면(`sweepy scan`으로 새 제안을 만든다) 제안 JSON에서 다음만 요약해 보낸다.
 
-4. 계획을 만든다. `plan_cleanup` 또는 `void plan`으로 dry-run 계획을 만들고, 항목별로 실행될 명령·예상 회수 용량·위험도를 사용자에게 보여준다. 계획은 1시간 뒤 만료된다.
+- 여유 공간: `free.state`, `free.free_percent`
+- 승인 대상: `tier`가 `approve`인 항목의 개수와 `bytes` 합계, 큰 항목 상위 10개(`path`, `kind`, `reason`)
+- 제외: `excluded`를 `reason`별 개수로 묶은 요약(커밋 안 된 변경, 원격에 없는 커밋, 사용 중, 보호 경로 등)
+- `errors`가 있으면 그대로 적는다. macOS 권한 대화상자가 언급되면 화면에서 "허용 안 함"으로 답해 달라고 안내한다.
+- 마지막 줄: `정리하려면 "디스크 정리 승인 <id 앞 8자>"라고 답장해 주세요`
 
-5. 승인을 받는다. 사용자가 이 계획을 명시적으로 승인하기 전에는 `apply_plan` / `void apply`를 호출하지 않는다. 승인 범위를 벗어난 항목을 추가하지 않는다. 계획이 만료됐으면 다시 만들고 다시 승인받는다.
+## 승인과 적용
 
-6. 적용하고 검증한다. 승인된 계획 ID로만 적용하고, 적용 후 `disk_status`로 실제 회수량을 다시 재서 계획 대비 결과를 보고하면 완료한다. pnpm·Bun 저장소와 하드링크나 APFS 복제로 블록을 공유하는 `node_modules`는 지워도 공간이 덜 늘 수 있으므로, Void가 보고한 회수량과 실제 증가한 여유 공간을 함께 적는다.
+1. 사용자가 특정 제안을 명시적으로 승인했을 때만 `sweepy apply <id>`를 실행한다. 다른 제안이나 다른 등급으로 넓히지 않는다.
+2. 결과 JSON에서 `applied`, `freedBytes`(적용 전후 실측), `dropped`(다시 검증해서 빠진 항목과 이유), `failures`를 보고한다. `dropped`는 실패가 아니라 그 사이 상태가 바뀐 항목이다.
+3. 제안이 만료되었다는 오류가 나면 `sweepy scan`으로 새 제안을 만들어 다시 보고하고, 다시 승인받는다.
+
+`auto` 등급(사라진 워크트리 기록 정리, 유휴 워크트리 안 산출물)은 sweepy가 스케줄 실행에서 직접 다룬다. 정책의 `auto.enabled`가 `false`면 기록만 남긴다. 켜 달라는 요청을 받으면 정책 파일 변경 내용을 보여주고 확인받은 뒤에만 바꾼다.
 
 ## 금지
 
-- danger 등급 항목, `docker system prune -a --volumes`, 홈·프로젝트 루트 통째 삭제는 하지 않는다.
-- Void를 거치지 않고 `rm -rf`로 직접 지우지 않는다.
-- 프로세스를 이름만 보고 종료하지 않는다.
-- 이 스킬을 읽었다는 사실이 정리 실행 권한을 주지 않는다. 실행 권한은 사용자 승인과 런타임의 도구 정책이 정한다.
+- sweepy를 거치지 않는 삭제: `rm -rf`, `void apply`를 직접 실행, `git worktree remove --force`, `git branch -D`
+- 제안에 없는 항목 추가, `excluded` 항목을 강제로 포함
+- 승인 없이 `approve` 등급 적용
+- 이 스킬을 읽었다는 사실은 실행 권한이 아니다. 권한은 사용자 승인과 런타임의 도구 정책이 정한다.
 
-## 보고 형식
+## sweepy가 없을 때
 
-- 여유 공간(전/후), 회수 후보 총량, 위험도별 합계
-- 제외한 항목과 이유
-- 적용한 계획 ID와 실제 회수량, 실패한 항목
+Void(`void` CLI 또는 MCP)만 있으면 읽기 전용으로 현황만 보고한다. `void --json scan`에는 2분 제한을 건다(macOS: `perl -e 'alarm shift; exec @ARGV or die' 120 void --json scan`). 멈추면 `log show --last 10m --style compact --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "AUTHREQ_PROMPTING"'`로 권한 대화상자 대기 여부를 확인해 보고한다. 삭제가 필요하면 sweepy 설치를 권하고, 사용자가 원하면 `void plan` 결과를 보여주고 승인받은 계획만 `void apply`한다.
