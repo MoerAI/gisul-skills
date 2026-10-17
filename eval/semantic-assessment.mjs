@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { SCORE_VERSION } from './score.mjs';
+import { createJudge, readSelection, validateSelection } from './frontier-judge.mjs';
 
 const HASH = /^[a-f0-9]{64}$/;
 const SEMANTIC = new Set(['semantic_rubric', 'decision_required', 'task_outcome']);
@@ -17,6 +20,7 @@ export function reviewShape(value, required, optional = []) {
     && Object.keys(value).every(key => required.includes(key) || optional.includes(key)), 'REVIEW_FORMAT');
 }
 const text = value => typeof value === 'string' && value.trim().length > 0;
+const record = value => value && typeof value === 'object' && !Array.isArray(value);
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 
 export async function readReviewArtifact(root, name, { optional = false } = {}) {
@@ -75,7 +79,9 @@ export async function readRunSnapshot(root) {
     }
     entries.push({ slot, item, result, resultHash: source.hash });
   }
-  const assessment = (await readReviewArtifact(root, 'assessment.json', { optional: true }))?.value ?? { status: 'not_reviewed' };
+  const assessmentFile = await readReviewArtifact(root, 'assessment.json', { optional: true });
+  const assessment = assessmentFile ? assessmentFile.value : { status: 'not_reviewed' };
+  reviewCheck(record(assessment) && text(assessment.status), 'REVIEW_ASSESSMENT_INVALID');
   return { root: await realpath(root), protocol, cases, phase, summary, assessment, entries };
 }
 
@@ -115,11 +121,20 @@ export function judgmentRequest({ item, result }) {
 }
 
 function judgeIdentity(value) {
-  reviewShape(value, ['sourceKind', 'id', 'version', 'model'], ['adapterHash', 'cliVersion', 'effort']);
+  reviewShape(value, ['sourceKind', 'id', 'version', 'model'], ['adapterHash', 'cliVersion', 'effort', 'selection', 'reportedModel', 'identityEvidence']);
   reviewCheck(['model', 'fixture'].includes(value.sourceKind) && [value.id, value.version, value.model].every(text)
     && (value.adapterHash === undefined || HASH.test(value.adapterHash))
     && (value.cliVersion === undefined || text(value.cliVersion))
-    && (value.effort === undefined || text(value.effort)), 'REVIEW_JUDGE_IDENTITY');
+    && (value.effort === undefined || text(value.effort))
+    && (value.reportedModel === undefined || value.reportedModel === null || value.reportedModel === value.model)
+    && (value.identityEvidence === undefined || text(value.identityEvidence)), 'REVIEW_JUDGE_IDENTITY');
+  if (value.selection !== undefined) validateSelection(value.selection);
+  if (value.sourceKind === 'model') {
+    reviewCheck(value.selection, 'REVIEW_FRONTIER_REQUIRED');
+    const selected = value.selection.selected;
+    reviewCheck(value.id === selected.transport && value.version === value.selection.hash
+      && value.model === selected.model && value.effort === selected.effort, 'REVIEW_FRONTIER_MISMATCH');
+  }
 }
 
 function validateJudgment(value, request) {
@@ -170,7 +185,9 @@ export function validateSemanticAssessment(snapshot, artifact) {
     let status = state.observableStatus;
     if (status === 'pass' && state.required.length) {
       reviewCheck(HASH.test(entry.promptHash) && entry.responseHash === reviewHash(JSON.stringify(entry.judgment)), 'REVIEW_JUDGMENT_FORMAT');
-      status = validateJudgment(entry.judgment, judgmentRequest(source));
+      const request = judgmentRequest(source);
+      reviewCheck(entry.promptHash === reviewHash(request.prompt), 'REVIEW_PROMPT_MISMATCH');
+      status = validateJudgment(entry.judgment, request);
     } else {
       reviewCheck(entry.judgment === null && entry.promptHash === null && entry.responseHash === null, 'REVIEW_JUDGMENT_FORMAT');
     }
@@ -226,4 +243,132 @@ export async function assessRun(root, { judge, judgeInfo, write = false } = {}) 
     return artifact;
   };
   return write ? withReviewWrite(root, 'semantic-assessment.json', assess) : assess();
+}
+
+export async function compareRuns(baselineRoot, candidateRoot) {
+  const controls = ['dataset', 'sourceCommit', 'codexVersion', 'model', 'effort', 'fileHashes', 'instructionHashes',
+    'loaderMarkdown', 'reader', 'commonInstructions', 'maxTokens', 'concurrency', 'timeoutMs'];
+  const report = {
+    schema: 1, kind: 'matched-comparison', eligible: false, humanRatings: 0, promotion: 'not_evaluated',
+    judge: null, baseline: null, candidate: null, costRatio: null, cases: [], reasons: [],
+  };
+  const loaded = {};
+  for (const [side, root] of [['baseline', baselineRoot], ['candidate', candidateRoot]]) {
+    try {
+      const snapshot = await readRunSnapshot(root);
+      const file = await readReviewArtifact(root, 'semantic-assessment.json', { optional: true });
+      if (!file) { report.reasons.push({ code: 'SEMANTIC_ASSESSMENT_MISSING', side }); continue; }
+      const review = validateSemanticAssessment(snapshot, file.value);
+      const byCase = new Map(review.entries.map(entry => [entry.caseId, entry]));
+      const p = snapshot.protocol;
+      const valid = {
+        dataset: record(p.dataset) && text(p.dataset.name) && HASH.test(p.dataset.version) && Number.isInteger(p.dataset.totalCases) && p.dataset.totalCases > 0,
+        sourceCommit: typeof p.sourceCommit === 'string' && /^[a-f0-9]{40}$/.test(p.sourceCommit),
+        codexVersion: text(p.codexVersion), model: text(p.model), effort: text(p.effort),
+        fileHashes: record(p.fileHashes) && Object.keys(p.fileHashes).length > 0 && Object.entries(p.fileHashes).every(([path, hash]) => text(path) && HASH.test(hash)),
+        instructionHashes: record(p.instructionHashes) && ['baseline', 'candidate'].every(key => HASH.test(p.instructionHashes[key])
+          && typeof p.instructions?.[key] === 'string' && reviewHash(p.instructions[key]) === p.instructionHashes[key]),
+        loaderMarkdown: typeof p.loaderMarkdown === 'string',
+        reader: record(p.reader) && text(p.reader.commit) && text(p.reader.release) && HASH.test(p.reader.bundleHash),
+        commonInstructions: typeof p.commonInstructions === 'string',
+        maxTokens: Number.isInteger(p.maxTokens) && p.maxTokens > 0,
+        concurrency: Number.isInteger(p.concurrency) && p.concurrency > 0,
+        timeoutMs: Number.isInteger(p.timeoutMs) && p.timeoutMs > 0,
+      };
+      const invalid = controls.filter(key => !valid[key]);
+      if (invalid.length) report.reasons.push({ code: 'PROTOCOL_INCOMPLETE', side, fields: invalid });
+      if (p.profile !== side) report.reasons.push({ code: 'PROFILE_MISMATCH', side });
+      if (snapshot.assessment.status === 'diagnostic_invalid_for_behavior') report.reasons.push({ code: 'HARNESS_DIAGNOSTIC', side });
+      if (review.judge.sourceKind !== 'model') report.reasons.push({ code: 'JUDGE_NOT_FRONTIER', side });
+      else if (!HASH.test(review.judge.adapterHash) || !text(review.judge.cliVersion)) report.reasons.push({ code: 'JUDGE_INCOMPLETE', side });
+      const results = snapshot.entries.map(entry => entry.result);
+      if (results.some(result => result?.status !== 'completed')) report.reasons.push({ code: 'EXECUTION_INCOMPLETE', side });
+      if (results.some(result => !Number.isFinite(result?.usage?.totalTokens) || result.usage.totalTokens < 0)) report.reasons.push({ code: 'USAGE_UNKNOWN', side });
+      const knownCost = results.every(result => Number.isFinite(result?.estimatedCost) && result.estimatedCost >= 0);
+      if (!knownCost) report.reasons.push({ code: 'COST_UNKNOWN', side });
+      if (!record(p.prices) || !Object.keys(p.prices).length) report.reasons.push({ code: 'COST_BASIS_UNKNOWN', side });
+      if (review.entries.some(entry => entry.status === 'unverified')) report.reasons.push({ code: 'UNVERIFIED_GRADING', side });
+      const summary = {
+        protocolHash: p.hash, assessmentHash: file.hash, casebook: p.dataset, cases: snapshot.cases.length,
+        executed: results.filter(result => result?.status === 'completed').length,
+        passes: review.entries.filter(entry => entry.status === 'pass').length,
+        failures: review.entries.filter(entry => entry.status === 'fail').length,
+        unverified: review.entries.filter(entry => entry.status === 'unverified').length,
+        holdoutPasses: snapshot.cases.filter(item => item.split === 'holdout' && byCase.get(item.id).status === 'pass').length,
+        criticalFailures: snapshot.cases.filter(item => item.critical && byCase.get(item.id).status === 'fail').length,
+        semanticJudgments: review.entries.filter(entry => entry.judgment !== null).length,
+        meanCost: knownCost ? results.reduce((sum, result) => sum + result.estimatedCost, 0) / results.length : null,
+      };
+      loaded[side] = { snapshot, review, byCase, summary };
+      report[side] = summary;
+    } catch (error) { report.reasons.push({ code: 'EVIDENCE_INVALID', side, cause: error.code ?? 'REVIEW_FAILED' }); }
+  }
+  if (!loaded.baseline || !loaded.candidate) return report;
+  const baseline = loaded.baseline, candidate = loaded.candidate;
+  const fields = controls.filter(key => !isDeepStrictEqual(baseline.snapshot.protocol[key], candidate.snapshot.protocol[key]));
+  if (fields.length) report.reasons.push({ code: 'PROTOCOL_MISMATCH', fields });
+  if (!isDeepStrictEqual(baseline.snapshot.protocol.prices, candidate.snapshot.protocol.prices)) report.reasons.push({ code: 'COST_BASIS_MISMATCH' });
+  const judgeKeys = ['sourceKind', 'id', 'version', 'model', 'effort', 'adapterHash', 'cliVersion'];
+  if (baseline.review.processorHash !== candidate.review.processorHash
+    || judgeKeys.some(key => !isDeepStrictEqual(baseline.review.judge[key], candidate.review.judge[key]))) {
+    report.reasons.push({ code: 'JUDGE_MISMATCH' });
+  }
+  report.judge = structuredClone(baseline.review.judge);
+  report.cases = baseline.snapshot.cases.map(item => ({
+    caseId: item.id, split: item.split, critical: item.critical,
+    baseline: baseline.byCase.get(item.id).status, candidate: candidate.byCase.get(item.id)?.status ?? 'unverified',
+  }));
+  const critical = report.cases.filter(item => item.critical && item.baseline === 'pass' && item.candidate === 'fail').map(item => item.caseId);
+  if (critical.length) report.reasons.push({ code: 'CRITICAL_REGRESSION', cases: critical });
+  if (!baseline.summary.unverified && !candidate.summary.unverified) {
+    if (candidate.summary.holdoutPasses < baseline.summary.holdoutPasses) report.reasons.push({ code: 'HOLDOUT_REGRESSION' });
+    if (candidate.summary.passes < baseline.summary.passes) report.reasons.push({ code: 'TOTAL_PASS_REGRESSION' });
+  }
+  if (baseline.summary.meanCost !== null && candidate.summary.meanCost !== null) {
+    report.costRatio = baseline.summary.meanCost === 0 ? null : candidate.summary.meanCost / baseline.summary.meanCost;
+    if (candidate.summary.meanCost > baseline.summary.meanCost * 1.3) report.reasons.push({ code: 'COST_REGRESSION' });
+  }
+  report.eligible = report.reasons.length === 0;
+  return report;
+}
+
+const main = process.argv[1] && await realpath(process.argv[1]).catch(() => null);
+if (main === await realpath(fileURLToPath(import.meta.url))) {
+  try {
+    const { values } = parseArgs({ options: {
+      run: { type: 'string' }, selection: { type: 'string' }, apply: { type: 'boolean', default: false },
+      compare: { type: 'boolean', default: false }, baseline: { type: 'string' }, candidate: { type: 'string' },
+    } });
+    if (values.compare) {
+      reviewCheck(values.baseline && values.candidate && !values.run && !values.selection && !values.apply, 'REVIEW_USAGE');
+      const report = await compareRuns(resolve(values.baseline), resolve(values.candidate));
+      console.log(JSON.stringify(report, null, 2));
+      if (!report.eligible) process.exitCode = 2;
+    } else {
+      reviewCheck(values.run && values.selection && !values.baseline && !values.candidate, 'REVIEW_USAGE');
+      const selection = await readSelection(resolve(values.selection));
+      const root = resolve(values.run), snapshot = await readRunSnapshot(root);
+      reviewCheck(!await readReviewArtifact(root, 'langfuse-upload-intent.json', { optional: true }), 'REVIEW_EXPORT_FROZEN');
+      if (!values.apply) {
+        console.log(JSON.stringify({ dryRun: true, protocolHash: snapshot.protocol.hash, cases: snapshot.entries.length, selection }, null, 2));
+      } else {
+        const controller = new AbortController();
+        const interrupt = () => controller.abort();
+        process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
+        let backend;
+        try {
+          backend = await createJudge(selection, { root, signal: controller.signal });
+          const artifact = await assessRun(root, { judge: backend.judge, judgeInfo: backend.judgeInfo, write: true });
+          reviewCheck(!controller.signal.aborted, 'JUDGE_CANCELLED');
+          console.log(JSON.stringify({ written: true, path: join(root, 'semantic-assessment.json'), protocolHash: artifact.protocolHash,
+            judge: artifact.judge, outcomes: artifact.entries.map(({ caseId, status }) => ({ caseId, status })) }, null, 2));
+        } finally {
+          await backend?.close();
+          process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ error: error.code ?? 'REVIEW_FAILED' })); process.exitCode = error.code === 'JUDGE_CANCELLED' ? 130 : 1;
+  }
 }
