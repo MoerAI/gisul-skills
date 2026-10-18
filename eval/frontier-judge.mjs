@@ -201,6 +201,10 @@ export async function createJudge(selection, { root, env: sourceEnv = process.en
       } finally { await api.close(); await active.closed; track.active.delete(active); }
       info.identityEvidence = 'requested_model_and_catalog';
     } else {
+      const [major, minor, patch] = info.cliVersion.split(' ')[0].split('.').map(Number);
+      if (!(major > 2 || (major === 2 && (minor > 1 || (minor === 1 && patch >= 259))))) {
+        throw Object.assign(new Error(`Claude Code 2.1.259 or newer is required; found ${info.cliVersion}`), { code: 'JUDGE_CLI_UNSUPPORTED' });
+      }
       const status = await runProcess(command, ['auth', 'status', '--json'], { cwd: workspace, env: childEnv, timeoutMs: 60000, track });
       let auth;
       try { auth = JSON.parse(status.stdout); } catch { fail('JUDGE_AUTH_MISSING'); }

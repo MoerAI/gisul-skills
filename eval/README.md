@@ -179,7 +179,14 @@ Policy structure, with illustrative values to replace from the selected source:
 ```
 
 Supported routes are `openai`/`codex-cli` and `anthropic`/`claude-cli`, using the
-installed, authenticated subscription CLI. Add every configuration covered by
+installed, authenticated subscription CLI. Claude Code 2.1.259 or newer is
+required: `--restricted` was introduced in 2.1.248 and `--permission-prompts` in
+2.1.259, as recorded in the [official CLI reference](https://code.claude.com/docs/en/cli-reference).
+Older versions fail with `JUDGE_CLI_UNSUPPORTED` before authentication or
+inference. The route was exercised with Claude Code 2.1.296; version support
+alone does not establish access to a selected model.
+
+Add every configuration covered by
 the declared comparison scope. A tied top score, malformed policy, unavailable
 winner, unsupported effort or visibly rerouted response fails; the adapter never
 silently chooses a weaker model. Evidence URLs are public HTTPS URLs without
@@ -216,7 +223,10 @@ the protocol, casebook, expected contract, result bytes and actual prompt hash.
 It records the selection, requested model/effort, CLI version and adapter/source
 hashes. Provider-reported model identity is retained when available and must
 match the request. Codex also verifies the requested profile against its live
-catalog; Claude requires a matching `modelUsage` report. An independently
+catalog and reports `identityEvidence: "requested_model_and_catalog"`. If its
+`thread.started` event omits the model, `reportedModel` remains null; this is
+request/catalog evidence, not provider-reported identity. A reported model must
+match. Claude requires a matching `modelUsage` report. An independently
 attested provider weight revision is not available from these CLI contracts.
 `fail`, `abstain` and missing evidence remain distinct from passing review.
 

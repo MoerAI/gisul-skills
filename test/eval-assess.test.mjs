@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { watch } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -337,7 +337,7 @@ test('model-only assessment retains the frozen winner and needs no human input',
   assert.equal(JSON.parse(await readFile(join(fixture.root, 'protocol.json'))).humanRatings, 0);
 });
 
-async function fixtureTransports(t) {
+async function fixtureTransports(t, { claudeVersion = '2.1.296' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'frontier-transport-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const bin = join(root, 'bin'), auth = join(root, 'auth'), home = join(root, 'home');
@@ -349,8 +349,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2), claude = path.basename(process.argv[1]) === 'claude';
 const get = flag => args[args.indexOf(flag) + 1];
-if (args.includes('--version')) console.log(claude ? '2.1.296 (Claude Code)' : 'codex-cli 0.160.0');
-else if (claude && args[0] === 'auth') console.log(JSON.stringify({loggedIn:true}));
+if (args.includes('--version')) console.log(claude ? ${JSON.stringify(`${claudeVersion} (Claude Code)`)} : 'codex-cli 0.160.0');
+else if (claude && args[0] === 'auth') {
+  fs.writeFileSync(path.join(__dirname,'auth-called'),'true');
+  console.log(JSON.stringify({loggedIn:true}));
+}
 else if (args[0] === 'app-server') {
   require('node:readline').createInterface({input:process.stdin}).on('line', line => {
     const message = JSON.parse(line);
@@ -448,6 +451,41 @@ test('a provider failure is retained and cannot trigger another model or an impl
     assert.equal(receipt.error, 'JUDGE_EXECUTION_FAILED');
     assert.equal((await readFile(join(transport.bin, 'calls.jsonl'), 'utf8')).trim().split('\n').length, 1);
   } finally { await backend.close(); }
+});
+
+test('Claude preflight rejects unsupported versions before authentication or inference', async t => {
+  const { selectJudge, createJudge } = await import('../eval/frontier-judge.mjs');
+  const policy = frontierPolicy();
+  policy.candidates.push({ id: 'next', provider: 'anthropic', transport: 'claude-cli', model: 'qa-next', effort: 'max', score: 5, fallback: false, evidenceUrl: 'https://example.test/next' });
+  const selection = selectJudge(policy);
+  for (const version of ['1.99.999', '2.1.236', '2.1.258']) await t.test(version, async t => {
+    const fixture = await runFixture(t), transport = await fixtureTransports(t, { claudeVersion: version });
+    let backend, failure;
+    try {
+      await assert.rejects(async () => {
+        try { backend = await createJudge(selection, { root: fixture.root, env: transport.env }); }
+        catch (error) { failure = error; throw error; }
+      }, { code: 'JUDGE_CLI_UNSUPPORTED' });
+    } finally { await backend?.close(); }
+    await assert.rejects(lstat(join(transport.bin, 'auth-called')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(fixture.root, 'judge-attempts')), { code: 'ENOENT' });
+    await assert.rejects(lstat(failure.resources.temporary), { code: 'ENOENT' });
+    for (const { pid } of failure.resources.processes) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  });
+});
+
+test('Claude preflight accepts the minimum version and newer minor or major versions', async t => {
+  const { selectJudge, createJudge } = await import('../eval/frontier-judge.mjs');
+  const policy = frontierPolicy();
+  policy.candidates.push({ id: 'next', provider: 'anthropic', transport: 'claude-cli', model: 'qa-next', effort: 'max', score: 5, fallback: false, evidenceUrl: 'https://example.test/next' });
+  const selection = selectJudge(policy);
+  for (const version of ['2.1.259', '2.2.0', '3.0.0']) await t.test(version, async t => {
+    const fixture = await runFixture(t), transport = await fixtureTransports(t, { claudeVersion: version });
+    const backend = await createJudge(selection, { root: fixture.root, env: transport.env });
+    try { assert.equal(backend.judgeInfo.cliVersion, `${version} (Claude Code)`); }
+    finally { await backend.close(); }
+    await assert.rejects(lstat(backend.resources.temporary), { code: 'ENOENT' });
+  });
 });
 
 test('Claude transport requires the selected reported model and rejects a weaker reroute', async t => {
