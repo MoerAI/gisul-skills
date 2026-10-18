@@ -25,6 +25,16 @@ keywords, and unresolved Markdown links into `references/`, `scripts/`, or
 `assets/` are warnings. They do not silently change imported content or disagree
 with the server's eligibility rules. Invalid skills cause a nonzero exit.
 
+The top-level `keywords` array is a gisul discovery extension. The pinned
+producer `02d782d61d062d503a2992214f254f7f20b0a3ad` consumes it in
+`server/src/codex.ts`; that bridge does not index a `metadata.keywords` string.
+Moving the terms there alone loses keyword-only search matches. Skills using
+this extension are not claimed to pass strict external Agent Skills validators:
+the reference `skills-ref` validator rejects the array's YAML flow syntax and
+does not allow an extra top-level `keywords` field. A portable export would need
+standard string-valued metadata and a corresponding consumer update before
+relying on the same gisul search behavior.
+
 The integration test compares valid and skipped skill directories with the real
 server, including malformed frontmatter, limits, and symlink cases. Set
 `GISUL_SERVER_PATH` to the server's compiled `dist/index.js` when running it.
