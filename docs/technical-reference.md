@@ -27,6 +27,13 @@ cache, the existing sibling `../gisul` layout, or explicit `GISUL_SERVER_PATH`
 and `GISUL_WORKER_PATH` overrides. It fails with preparation instructions if
 server/bridge builds or Worker dependencies are absent.
 
+The integration filenames are listed explicitly in `scripts/verify.mjs`.
+When adding a test that needs the producer, add its basename to that set;
+unlisted test files belong to the runtime-free unit suite. The partition test
+checks listed fixture filenames, not future dependency discovery. For a Linux
+self-hosted runner that does not set `CI`, set `CI=true` when invoking `verify`
+to request Chromium's system dependencies as well.
+
 The validator independently implements the server's discovery rules: LF YAML
 frontmatter with nonempty string `name` and `description`, name matching the final
 directory component, at most 512 visible regular files and 16 MiB per skill.
