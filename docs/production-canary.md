@@ -40,6 +40,17 @@ receipt even on failure. Set `GISUL_CANARY_EXPECTED` as a repository variable
 when selecting the expected published release. It contains only the small
 identity/URL/digest snapshot, not the full inventory or credentials.
 
+The expected snapshot is intentionally independent of the service being checked.
+After publishing a release or changing the runtime, verify the retained release
+artifact and deployed identity, then update `GISUL_CANARY_EXPECTED` through the
+repository's configuration controls. Until that update, a mismatch is an
+intentional stale-baseline failure, not automatic acceptance of a new release.
+The publisher does not update this variable, and the canary remains read-only.
+
+Failure notification uses GitHub Actions' existing notification settings and the
+retained failed run/receipt. This workflow adds no Slack, webhook or other alert
+destination; configure those separately if the operator requires them.
+
 Existing publication callers retain their original smoke behavior. Runtime
 checking is required by this canary but remains an explicit optional
 `runtimeVersion` argument to `smokeR2`. This workflow performs no deployment.
